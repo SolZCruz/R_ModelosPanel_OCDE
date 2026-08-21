@@ -1,0 +1,101 @@
+# ============================================================
+# 01_limpieza
+# Taller: Modelos de Panel (Efectos Fijos vs Efectos Aleatorios)
+# Objetivo: leer el CSV crudo exportado del World Bank Data Bank,
+#           limpiarlo, y convertirlo de formato ancho a formato
+#           panel largo (una fila = pais-anio).
+# ============================================================
+
+# ---- 1. Paquetes ----
+#install.packages(c("tidyverse", "janitor")) 
+library(tidyverse)
+library(janitor)   # para limpiar nombres de columnas automaticamente
+
+# ---- 2. Leer datos crudos ----
+
+ruta_datos <- "data/raw/Data.csv"
+ 
+datos_crudos <- read_csv(ruta_datos, na = c("..", "", "NA"))
+ 
+# ---- 3. Limpiar nombres de columnas ----
+# El Data Bank suele exportar columnas de anio con formato:
+# "2010 [YR2010]", "2011 [YR2011]", etc.
+# janitor::clean_names() las deja como "x2010_yr2010", por eso
+# extraemos el anio con una expresion regular en el siguiente paso.
+datos <- datos_crudos %>%
+  clean_names()
+ 
+# ---- 4. Revisar la estructura antes de continuar ----
+# Descomenta estas lineas para inspeccionar el archivo real
+glimpse(datos)
+names(datos)
+ 
+# ---- 5. Pivotear los anios: de columnas a filas (ancho -> largo) ----
+# Identificamos las columnas de anio: cualquier columna que empiece
+# con "x" seguido de 4 digitos (ej. x2010_yr2010)
+columnas_anio <- names(datos)[str_detect(names(datos), "^x[0-9]{4}")]
+ 
+# IMPORTANTE: el CSV del Banco Mundial trae filas de "pie de pagina" al
+# final (ej. "Data from database: World Development Indicators",
+# "Last Updated: ...") que no son paises ni indicadores reales.
+# Las eliminamos quedandonos solo con filas que tengan un codigo de
+# pais y de indicador validos.
+datos <- datos %>%
+  filter(!is.na(country_code), country_code != "",
+         !is.na(series_code), series_code != "")
+ 
+panel_largo <- datos %>%
+  select(country_name, country_code, series_name, series_code,
+         all_of(columnas_anio)) %>%
+  pivot_longer(
+    cols = all_of(columnas_anio),
+    names_to = "anio",
+    values_to = "valor"
+  ) %>%
+  # Extraer el anio numerico del nombre de columna (ej "x2010_yr2010" -> 2010)
+  mutate(anio = as.integer(str_extract(anio, "(?<=x)[0-9]{4}")))
+ 
+# ---- 6. Pivotear los indicadores: de filas a columnas ----
+# Cada "series_name" (indicador) pasa a ser su propia variable/columna
+panel_ancho_final <- panel_largo %>%
+  select(country_name, country_code, anio, series_name, valor) %>%
+  pivot_wider(
+    names_from = series_name,
+    values_from = valor
+  ) %>%
+  clean_names()   # deja los nombres de indicador en formato snake_case
+ 
+# ---- 7. Renombrar variables clave a nombres cortos y manejables ----
+# IMPORTANTE: ajusta estos nombres una vez veas los nombres reales
+# que resultan del paso anterior (con names(panel_ancho_final))
+panel_final <- panel_ancho_final %>%
+  rename(
+    pais            = country_name,
+    codigo_pais     = country_code,
+    pib_trabajador  = matches("gdp_per_person_employed"),
+    internet        = matches("individuals_using_the_internet"),
+    electricidad    = matches("access_to_electricity"),
+    matricula_terc  = matches("school_enrollment_tertiary"),
+    id_gdp          = matches("research_and_development_expenditure")
+  )
+ 
+# ---- 8. Revisar el panel: balanceado y sin NA ----
+n_paises <- n_distinct(panel_final$pais)
+n_anios  <- n_distinct(panel_final$anio)
+ 
+cat("Numero de paises:", n_paises, "\n")
+cat("Numero de anios:", n_anios, "\n")
+cat("Filas esperadas si es balanceado:", n_paises * n_anios, "\n")
+cat("Filas reales:", nrow(panel_final), "\n")
+ 
+# Conteo de NA por variable (para detectar huecos restantes)
+panel_final %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  print()
+ 
+# ---- 9. Guardar el panel limpio ----
+dir.create("data/processed", showWarnings = FALSE, recursive = TRUE)
+write_csv(panel_final, "data/processed/panel_balanceado.csv")
+ 
+cat("\nListo. Panel guardado en data/processed/panel_balanceado.csv\n")
+ 

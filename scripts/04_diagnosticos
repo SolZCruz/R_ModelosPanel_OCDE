@@ -1,0 +1,88 @@
+# ============================================================
+# 04_diagnosticos.R
+# Taller: Modelos de Panel (Efectos Fijos vs Efectos Aleatorios)
+# Objetivo: revisar heterocedasticidad y autocorrelacion en el
+#           modelo ganador (Efectos Fijos, segun Hausman), y
+#           reportar errores estandar robustos si hace falta.
+# ============================================================
+
+# ---- 1. Paquetes ----
+install.packages(c("lmtest")) 
+library(tidyverse)
+library(plm)
+library(lmtest)   # para los tests de heterocedasticidad y los SE robustos
+
+# ---- 2. Cargar el panel y el modelo FE ya estimado ----
+panel <- read_csv("data/processed/panel_balanceado.csv")
+panel_pdata <- pdata.frame(panel, index = c("pais", "anio"))
+
+# modelo script 03:
+modelo_fe <- readRDS("output/tables/modelo_fe.rds")
+
+
+# ---- 3. Test de heterocedasticidad: Breusch-Pagan ----
+# H0: los residuos tienen varianza constante (homocedasticidad)
+# Si p < 0.05, se rechaza H0 -> hay heterocedasticidad -> conviene
+# usar errores estandar robustos.
+test_bp <- bptest(modelo_fe)
+print(test_bp)
+
+if (test_bp$p.value < 0.05) {
+  cat("\nHay evidencia de heterocedasticidad (p =",
+      round(test_bp$p.value, 4), "). Se recomienda usar errores\n",
+      "estandar robustos.\n")
+} else {
+  cat("\nNo hay evidencia fuerte de heterocedasticidad (p =",
+      round(test_bp$p.value, 4), ").\n")
+}
+
+# ---- 4. Test de autocorrelacion: Wooldridge para datos de panel ----
+# H0: no hay autocorrelacion serial de primer orden en los residuos
+# Si p < 0.05, se rechaza H0 -> hay autocorrelacion -> tambien
+# conviene usar errores estandar robustos (clustered).
+test_autocorrelacion <- pwartest(modelo_fe)
+print(test_autocorrelacion)
+
+if (test_autocorrelacion$p.value < 0.05) {
+  cat("\nHay evidencia de autocorrelacion serial (p =",
+      round(test_autocorrelacion$p.value, 4), "). Se recomienda usar\n",
+      "errores estandar robustos agrupados (clustered) por pais.\n")
+} else {
+  cat("\nNo hay evidencia fuerte de autocorrelacion serial (p =",
+      round(test_autocorrelacion$p.value, 4), ").\n")
+}
+
+# ---- 5. Reportar el modelo FE con errores estandar robustos ----
+# vcovHC calcula una matriz de varianzas-covarianzas robusta.
+# method = "arellano" es el estandar para datos de panel cuando hay
+# heterocedasticidad y/o autocorrelacion; cluster = "group" agrupa
+# los errores por pais (cada pais es un "cluster").
+resultados_robustos <- coeftest(
+  modelo_fe,
+  vcov = vcovHC(modelo_fe, method = "arellano", cluster = "group")
+)
+
+print(resultados_robustos)
+
+# ---- 6. Comparar coeficientes "normales" vs "robustos" lado a lado ----
+# Los coeficientes (el efecto estimado) NO cambian; lo que cambia
+# son los errores estandar (y por lo tanto los p-valores). Esto es
+# clave para explicar en el taller: robustecer no cambia la
+# magnitud del efecto, cambia que tan confiables son sus intervalos.
+cat("\n--- Errores estandar SIN corregir (originales) ---\n")
+print(coeftest(modelo_fe))
+
+cat("\n--- Errores estandar robustos (clustered por pais) ---\n")
+print(resultados_robustos)
+
+# ---- 7. Guardar la tabla de resultados robustos finales ----
+dir.create("output/tables", showWarnings = FALSE, recursive = TRUE)
+
+tabla_robusta <- as.data.frame(resultados_robustos[, ]) %>%
+  rownames_to_column("variable")
+
+write_csv(tabla_robusta, "output/tables/modelo_fe_robusto.csv")
+
+cat("\nListo. Diagnosticos completos. Resultados finales guardados en\n",
+    "output/tables/modelo_fe_robusto.csv\n")
+

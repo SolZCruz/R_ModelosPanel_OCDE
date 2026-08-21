@@ -1,0 +1,87 @@
+# ============================================================
+# 03_modelos.R
+# Taller: Modelos de Panel (Efectos Fijos vs Efectos Aleatorios)
+# Objetivo: estimar Pooled OLS, Efectos Fijos (FE), Efectos
+#           Aleatorios (RE), compararlos y correr el test de
+#           Hausman para decidir formalmente cual usar.
+# ============================================================
+
+# ---- 1. Paquetes ----
+#install.packages(c("plm", "stargazer", "collapse"))
+library(tidyverse)
+library(plm)         # modelos de panel: within (FE), random (RE)
+library(stargazer)   # para presentar los resultados en tablas comparativas
+
+# ---- 2. Cargar el panel limpio ----
+panel <- read_csv("data/processed/panel_balanceado.csv")
+
+# ---- 3. Declarar la estructura de panel ----
+# index = c(unidad, tiempo). Esto le dice a plm cual es el pais y
+# cual es el anio, para que sepa como calcular "dentro" y "entre".
+panel_pdata <- pdata.frame(panel, index = c("pais", "anio"))
+
+# ---- 4. Especificacion del modelo ----
+# Variable dependiente: pib_trabajador
+# Regresores: internet, electricidad, matricula_terc, id_gdp
+formula_modelo <- pib_trabajador ~ internet + electricidad +
+                                    matricula_terc + id_gdp
+
+# ---- 5. Modelo 1: Pooled OLS ----
+# Ignora por completo la estructura de panel: trata cada
+# observacion pais-anio como si fueran independientes entre si.
+# Sirve como punto de comparacion "ingenuo".
+modelo_pooled <- plm(formula_modelo, data = panel_pdata, model = "pooling")
+summary(modelo_pooled)
+
+# ---- 6. Modelo 2: Efectos Fijos (FE / within) ----
+# Controla por todo lo que es constante en el tiempo dentro de
+# cada pais (instituciones, geografia, cultura, etc.), usando
+# solo la variacion "dentro" de cada pais a traves de los anios.
+modelo_fe <- plm(formula_modelo, data = panel_pdata, model = "within")
+summary(modelo_fe)
+
+# ---- 7. Modelo 3: Efectos Aleatorios (RE) ----
+# Asume que el efecto especifico de cada pais NO esta
+# correlacionado con los regresores. Si el supuesto se cumple,
+# es mas eficiente que FE porque usa tanto la variacion "dentro"
+# como "entre" paises.
+modelo_re <- plm(formula_modelo, data = panel_pdata, model = "random")
+summary(modelo_re)
+
+# ---- 8. Comparar los tres modelos en una sola tabla ----
+# type = "text" imprime la tabla en la consola. Si quieres una
+# tabla en HTML para pegar en un Word/PowerPoint, usa type = "html"
+# y abre el archivo resultante en el navegador.
+stargazer(
+  modelo_pooled, modelo_fe, modelo_re,
+  type = "text",
+  column.labels = c("Pooled OLS", "Efectos Fijos", "Efectos Aleatorios"),
+  title = "Comparación de modelos: PIB por trabajador",
+  digits = 2,
+  out = "output/tables/comparacion_modelos.html"
+)
+
+# ---- 9. Test de Hausman: FE vs RE ----
+# H0: los efectos individuales (pais) NO estan correlacionados
+#     con los regresores -> RE es valido y mas eficiente, usalo.
+# H1: si estan correlacionados -> RE esta sesgado, usa FE.
+# Regla de decision: si el p-valor < 0.05, se rechaza H0 -> usar FE.
+test_hausman <- phtest(modelo_fe, modelo_re)
+print(test_hausman)
+
+if (test_hausman$p.value < 0.05) {
+  cat("\nResultado: se rechaza H0 (p =", round(test_hausman$p.value, 4),
+      ") -> se recomienda usar EFECTOS FIJOS.\n")
+} else {
+  cat("\nResultado: no se rechaza H0 (p =", round(test_hausman$p.value, 4),
+      ") -> se recomienda usar EFECTOS ALEATORIOS.\n")
+}
+
+# ---- 10. Guardar los modelos para usarlos despues (diagnosticos) ----
+saveRDS(modelo_pooled, "output/tables/modelo_pooled.rds")
+saveRDS(modelo_fe, "output/tables/modelo_fe.rds")
+saveRDS(modelo_re, "output/tables/modelo_re.rds")
+
+cat("\nListo. Modelos estimados y tabla comparativa guardada en output/tables/\n")
+
+stargazer(modelo_pooled, modelo_fe, modelo_re, type = "text")

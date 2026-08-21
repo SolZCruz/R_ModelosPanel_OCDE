@@ -1,0 +1,132 @@
+# ============================================================
+# 02_descriptivos.R
+# Taller: Modelos de Panel (Efectos Fijos vs Efectos Aleatorios)
+# Objetivo: cargar el panel limpio, generar estadistica descriptiva
+#           y graficos exploratorios (spaghetti plot) que motiven
+#           por que podria importar el efecto fijo por pais.
+# ============================================================
+
+# ---- 1. Paquetes ----
+#install.packages(c("skimr")) 
+library(tidyverse)
+library(skimr)   # da un resumen descriptivo mas completo que summary()
+
+# ---- 2. Cargar el panel limpio (salida del script 01) ----
+panel <- read_csv("data/processed/panel_balanceado.csv")
+
+# ---- 3. Vista rapida de la estructura ----
+glimpse(panel)
+
+# ---- 4. Estadistica descriptiva general ----
+# skim() da: media, desviacion estandar, min, max, cuartiles e
+# incluso un mini-histograma en texto por variable.
+panel %>%
+  select(pib_trabajador, internet, electricidad, matricula_terc, id_gdp) %>%
+  skim()
+
+# Alternativa mas basica si prefieres algo mas simple:
+summary(panel %>% select(pib_trabajador, internet, electricidad,
+                          matricula_terc, id_gdp))
+
+# ---- 5. Estadistica descriptiva por variable, en tabla ordenada ----
+
+tabla_descriptiva <- panel %>%
+  select(pib_trabajador, internet, electricidad, matricula_terc, id_gdp) %>%
+  summarise(across(
+    everything(),
+    list(media = mean, sd = sd, min = min, max = max),
+    na.rm = TRUE
+  )) %>%
+  pivot_longer(everything(),
+               names_to = c("variable", "estadistico"),
+               names_sep = "_(?=[a-z]+$)") %>%
+  pivot_wider(names_from = estadistico, values_from = value)
+
+print(tabla_descriptiva)
+
+# Guardar la tabla para usarla en la presentacion
+dir.create("output/tables", showWarnings = FALSE, recursive = TRUE)
+write_csv(tabla_descriptiva, "output/tables/estadistica_descriptiva.csv")
+
+# ---- 6. Verificar variacion entre paises vs. en el tiempo ----
+# Esto es clave para entender FE vs RE: si la variable dependiente
+# varia mucho MAS entre paises que dentro de cada pais a traves del
+# tiempo, es una senal de que el efecto fijo por pais importa.
+panel %>%
+  group_by(pais) %>%
+  summarise(promedio_pais = mean(pib_trabajador, na.rm = TRUE)) %>%
+  summarise(
+    variacion_entre_paises = sd(promedio_pais)
+  )
+
+panel %>%
+  group_by(pais) %>%
+  mutate(desvio_dentro_pais = pib_trabajador - mean(pib_trabajador, na.rm = TRUE)) %>%
+  ungroup() %>%
+  summarise(variacion_dentro_pais = sd(desvio_dentro_pais, na.rm = TRUE))
+
+# ---- 7. Grafico de lineas (spaghetti plot): PIB por trabajador en el tiempo ----
+# Cada linea es un pais. Si las lineas estan muy dispersas entre si
+# (unas muy arriba, otras muy abajo, sin cruzarse mucho) sugiere
+# diferencias estructurales entre paises -> motiva el efecto fijo.
+grafico_pib <- panel %>%
+  ggplot(aes(x = anio, y = pib_trabajador, color = pais, group = pais)) +
+  geom_line(linewidth = 0.7, alpha = 0.8) +
+  labs(
+    title = "PIB por persona empleada, 2007-2019",
+    subtitle = "Panel de 27 paises de la OCDE",
+    x = "Año",
+    y = "GDP per person employed (PPP constante)",
+    color = "País"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+print(grafico_pib)
+
+# Guardar el grafico
+dir.create("output/figures", showWarnings = FALSE, recursive = TRUE)
+ggsave("output/figures/spaghetti_pib_trabajador.png",
+       plot = grafico_pib, width = 10, height = 6, dpi = 300)
+
+# ---- 8. Version simplificada del grafico (sin leyenda saturada) ----
+# Con 27 paises la leyenda de colores queda muy cargada. Esta version
+# usa facetas (un mini-grafico por pais) para verlos mejor por separado.
+grafico_facetas <- panel %>%
+  ggplot(aes(x = anio, y = pib_trabajador, group = pais)) +
+  geom_line(color = "steelblue") +
+  facet_wrap(~ pais, scales = "free_y") +
+  labs(
+    title = "PIB por persona empleada por país, 2007-2019",
+    x = "Año",
+    y = "GDP per person employed"
+  ) +
+  theme_minimal(base_size = 8) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(grafico_facetas)
+
+ggsave("output/figures/facetas_pib_trabajador.png",
+       plot = grafico_facetas, width = 14, height = 10, dpi = 300)
+
+# ---- 9. Relacion simple entre internet y productividad (scatter) ----
+# Un primer vistazo visual, sin controlar por nada todavia, de la
+# relacion que vas a modelar formalmente despues.
+grafico_scatter <- panel %>%
+  ggplot(aes(x = internet, y = pib_trabajador)) +
+  geom_point(alpha = 0.5, color = "darkorange") +
+  geom_smooth(method = "lm", se = TRUE, color = "black") +
+  labs(
+    title = "Internet vs. productividad laboral",
+    subtitle = "Cada punto es un país en un año (sin controlar por efectos fijos)",
+    x = "Individuos que usan internet (% de la población)",
+    y = "GDP per person employed"
+  ) +
+  theme_minimal()
+
+print(grafico_scatter)
+
+ggsave("output/figures/scatter_internet_pib.png",
+       plot = grafico_scatter, width = 8, height = 6, dpi = 300)
+
+cat("\nListo. Tabla y graficos guardados en output/tables/ y output/figures/\n")
