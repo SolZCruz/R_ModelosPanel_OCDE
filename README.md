@@ -1,3 +1,5 @@
+**Español** | [English](README.en.md)
+
 # Taller de Modelos de Panel: Efectos Fijos vs. Efectos Aleatorios
 
 Taller aplicado sobre tecnología y productividad laboral en países de la OCDE, usando datos de panel del Banco Mundial (World Development Indicators).
