@@ -1,3 +1,5 @@
+**Español** | [English](results.en.md)
+
 # Taller de Modelos de Panel: Efectos Fijos vs. Efectos Aleatorios
 
 ## Tecnología y Productividad Laboral en Países de la OCDE
